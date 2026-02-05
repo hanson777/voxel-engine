@@ -1,0 +1,21 @@
+BasedOnStyle: LLVM
+
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+BreakBeforeBraces: Allman
+AlignAfterOpenBracket: BlockIndent
+AlignConsecutiveAssignments: None
+AlignConsecutiveDeclarations: None
+AllowAllArgumentsOnNextLine: false
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortBlocksOnASingleLine: Never
+
+ColumnLimit: 80
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+Cpp11BracedListStyle: false
+BinPackArguments: false
