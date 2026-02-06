@@ -11,6 +11,9 @@ AlignConsecutiveDeclarations: None
 AllowAllArgumentsOnNextLine: false
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortLambdasOnASingleLine: None
+KeepEmptyLinesAtTheStartOfBlocks: false
 
 ColumnLimit: 80
 IndentWidth: 4
