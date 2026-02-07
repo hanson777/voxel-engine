@@ -18,20 +18,19 @@ endif()
 # Vulkan - uses VULKAN_SDK env var automatically, or system install
 find_package(Vulkan REQUIRED)
 
-# SDL3 - fetch if not found
-find_package(SDL3 QUIET)
-if(NOT SDL3_FOUND)
-    include(FetchContent)
-    FetchContent_Declare(
-        SDL3
-        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG        main
-        GIT_SHALLOW    TRUE
-    )
-    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-    set(SDL_STATIC ON CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(SDL3)
-endif()
+# SDL3 - ALWAYS use FetchContent, never look for system SDL2/SDL3
+include(FetchContent)
+FetchContent_Declare(
+    SDL3
+    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+    GIT_TAG        main
+    GIT_SHALLOW    TRUE
+)
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(SDL3)
+
+message(STATUS "Using SDL3 from FetchContent")
 
 # KTX - fetch if not found
 find_package(Ktx QUIET)
@@ -92,11 +91,13 @@ set(SOURCES
     src/main.cpp
     core/platform/window.cpp
     gfx/vulkan/context.cpp
+    gfx/vulkan/validation.cpp
 )
 
 set(HEADERS
     core/platform/window.h
     gfx/vulkan/context.h
+    gfx/vulkan/validation.h
 )
 
 # --------------------------------------------------------------------------

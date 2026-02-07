@@ -3,16 +3,23 @@
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
 
+struct WindowConfig
+{
+    int width;
+    int height;
+    const char* title;
+};
+
 class Window
 {
   private:
     SDL_Window* m_window;
     int m_width;
     int m_height;
-    int m_shouldClose;
+    bool m_shouldClose;
 
   public:
-    Window(int width, int height);
+    Window(const WindowConfig& config);
     ~Window();
 
     SDL_Window* getSDLWindow() const;

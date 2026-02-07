@@ -1,13 +1,15 @@
 #include "window.h"
 #include <SDL3/SDL.h>
 
-Window::Window(int width, int height) : m_width(width), m_height(height)
+Window::Window(const WindowConfig& config)
 {
+    SDL_Init(SDL_INIT_VIDEO);
+    m_shouldClose = false;
     m_window = SDL_CreateWindow(
-        "Dead Voxel",
-        width,
-        height,
-        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE
+        config.title,
+        config.width,
+        config.height,
+        SDL_WINDOW_RESIZABLE
     );
 }
 
@@ -30,9 +32,9 @@ void Window::pollEvents()
         if (event.type == SDL_EVENT_QUIT)
         {
             m_shouldClose = true;
+            break;
         }
     }
-    m_shouldClose = false;
 }
 
 bool Window::shouldClose()
