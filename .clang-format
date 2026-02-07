@@ -15,6 +15,10 @@ AllowShortFunctionsOnASingleLine: None
 AllowShortLambdasOnASingleLine: None
 KeepEmptyLinesAtTheStartOfBlocks: false
 
+IncludeBlocks: Preserve
+SortIncludes:
+  Enabled: false
+
 ColumnLimit: 80
 IndentWidth: 4
 TabWidth: 4

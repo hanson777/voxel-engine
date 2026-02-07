@@ -6,24 +6,17 @@ int main()
     std::cout << "We are all alone on life's journey, held captive by the "
                  "limitations of human consciousness.\n";
 
-    Window window = Window(720, 1280);
-    bool done = false;
+    WindowConfig windowConfig{
+        .width = 720,
+        .height = 480,
+        .title = "V12",
+    };
+    Window window(windowConfig);
 
-    SDL_Init(SDL_INIT_VIDEO);
-
-    while (!done)
+    while (!window.shouldClose())
     {
-        SDL_Event event;
-
-        while (SDL_PollEvent(&event))
-        {
-            if (event.type == SDL_EVENT_QUIT)
-            {
-                done = true;
-            }
-        }
-
-        // Do game logic, present a frame, etc.
+        window.pollEvents();
     }
+
     return 0;
 }
