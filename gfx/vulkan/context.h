@@ -7,7 +7,6 @@
 #endif
 
 #include <SDL3/SDL.h>
-#include <vector>
 #include <vma/vk_mem_alloc.h>
 #include <volk/volk.h>
 #include "core/platform/window.h"
@@ -23,16 +22,25 @@ struct VulkanContextConfig
 class VulkanContext
 {
   private:
-    VkDebugUtilsMessengerEXT m_debugMessenger;
-    VkInstance m_instance;
-    VkDevice m_device;
-    std::vector<VkPhysicalDevice> m_devices;
-    VkQueue m_queue;
-    VkCommandPool m_commandPool;
-    VmaAllocator m_allocator;
-    VkSurfaceKHR m_surface;
+    VkDebugUtilsMessengerEXT m_debugMessenger{ VK_NULL_HANDLE };
+    VkInstance m_instance{ VK_NULL_HANDLE };
+    VkSurfaceKHR m_surface{ VK_NULL_HANDLE };
+    VkDevice m_device{ VK_NULL_HANDLE };
+    VkQueue m_queue{ VK_NULL_HANDLE };
+    VkCommandPool m_commandPool{ VK_NULL_HANDLE };
+    VmaAllocator m_allocator{ VK_NULL_HANDLE };
 
   public:
+    VulkanContext() = default;
+    ~VulkanContext()
+    {
+        shutdown();
+    }
+    VulkanContext(VulkanContext&) = delete;
+    VulkanContext& operator=(const VulkanContext&) = delete;
+    VulkanContext(VulkanContext&&) = delete;
+    VulkanContext& operator=(VulkanContext&&) = delete;
+
     void init(VulkanContextConfig& config);
     void shutdown();
 

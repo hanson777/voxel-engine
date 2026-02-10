@@ -71,7 +71,18 @@ void VulkanContext::init(VulkanContextConfig& config)
     }
 }
 
+void VulkanContext::shutdown()
+{
+    vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
+    vkDestroyInstance(m_instance, nullptr);
+}
+
 void VulkanContext::createSurface(const Window& window)
 {
     m_surface = createVulkanSurface(m_instance, window);
+}
+
+VkInstance VulkanContext::getInstance() const
+{
+    return m_instance;
 }
