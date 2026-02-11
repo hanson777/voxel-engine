@@ -8,7 +8,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     const VkDebugUtilsMessengerCallbackDataEXT* callbackData, void* userData
 )
 {
-    std::cerr << "validation: " << callbackData->pMessage << "\n";
+    std::cerr << "[VULKAN] " << callbackData->pMessage << '\n';
     return VK_FALSE;
 }
 

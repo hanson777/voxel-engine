@@ -11,7 +11,7 @@
 #include <volk/volk.h>
 #include "core/platform/window.h"
 
-struct VulkanContextConfig
+struct VulkanInstanceConfig
 {
     const char* appName = "App";
     uint32_t appVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -25,10 +25,19 @@ class VulkanContext
     VkDebugUtilsMessengerEXT m_debugMessenger{ VK_NULL_HANDLE };
     VkInstance m_instance{ VK_NULL_HANDLE };
     VkSurfaceKHR m_surface{ VK_NULL_HANDLE };
-    VkDevice m_device{ VK_NULL_HANDLE };
+    VkPhysicalDevice m_physicalDevice{ VK_NULL_HANDLE };
+    VkDevice m_logicalDevice{ VK_NULL_HANDLE };
+    uint32_t m_queueFamily{ 0 };
     VkQueue m_queue{ VK_NULL_HANDLE };
     VkCommandPool m_commandPool{ VK_NULL_HANDLE };
     VmaAllocator m_allocator{ VK_NULL_HANDLE };
+
+    void createInstance(VulkanInstanceConfig& config);
+    void createSurface(const Window& window);
+    void selectPhysicalDevice();
+    uint32_t findQueueFamily();
+    void createLogicalDevice();
+    void createSwapchain();
 
   public:
     VulkanContext() = default;
@@ -41,10 +50,8 @@ class VulkanContext
     VulkanContext(VulkanContext&&) = delete;
     VulkanContext& operator=(VulkanContext&&) = delete;
 
-    void init(VulkanContextConfig& config);
+    void init(VulkanInstanceConfig& config, const Window& window);
     void shutdown();
-
-    void createSurface(const Window& window);
 
     VkInstance getInstance() const;
 };
