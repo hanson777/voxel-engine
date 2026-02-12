@@ -6,9 +6,10 @@
 #define VK_NO_PROTOTYPES
 #endif
 
+#include <volk/volk.h>
 #include <SDL3/SDL.h>
 #include <vma/vk_mem_alloc.h>
-#include <volk/volk.h>
+#include <vector>
 #include "core/platform/window.h"
 
 struct VulkanInstanceConfig
@@ -29,15 +30,34 @@ class VulkanContext
     VkDevice m_logicalDevice{ VK_NULL_HANDLE };
     uint32_t m_queueFamily{ 0 };
     VkQueue m_queue{ VK_NULL_HANDLE };
+    VkSwapchainKHR m_swapchain{ VK_NULL_HANDLE };
+    std::vector<VkImage> m_swapchainImages;
+    std::vector<VkImageView> m_swapchainImageViews;
+    VkFormat m_swapchainImageFormat{ VK_FORMAT_UNDEFINED };
+    VkExtent2D m_swapchainExtent{};
     VkCommandPool m_commandPool{ VK_NULL_HANDLE };
     VmaAllocator m_allocator{ VK_NULL_HANDLE };
 
     void createInstance(VulkanInstanceConfig& config);
+
+    // Surface
     void createSurface(const Window& window);
+
+    // Device selection
     void selectPhysicalDevice();
     uint32_t findQueueFamily();
     void createLogicalDevice();
-    void createSwapchain();
+
+    // Swapchain
+    void createSwapchain(const Window& window);
+    VkSurfaceFormatKHR chooseSwapSurfaceFormat(
+        const std::vector<VkSurfaceFormatKHR>& availableFormats
+    );
+    VkPresentModeKHR
+    chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availableModes);
+    VkExtent2D chooseSwapExtent(
+        const VkSurfaceCapabilitiesKHR& capabilities, const Window& window
+    );
 
   public:
     VulkanContext() = default;
