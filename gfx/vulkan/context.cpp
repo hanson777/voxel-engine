@@ -14,7 +14,7 @@ void VulkanContext::createInstance(VulkanInstanceConfig& config)
     VkApplicationInfo appInfo{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
         .pApplicationName = config.appName,
-        .apiVersion = config.apiVersion,
+        .apiVersion = VULKAN_API_VERSION,
     };
 
     uint32_t instanceExtensionCount{ 0 };
@@ -33,7 +33,6 @@ void VulkanContext::createInstance(VulkanInstanceConfig& config)
 
 void VulkanContext::createSurface(const Window& window)
 {
-    VkSurfaceKHR surface{ VK_NULL_HANDLE };
     SDL_Vulkan_CreateSurface(
         window.getSDLWindow(),
         m_instance,
@@ -116,9 +115,16 @@ void VulkanContext::init(VulkanInstanceConfig& config, const Window& window)
     selectPhysicalDevice();
     assert(m_physicalDevice);
     createLogicalDevice();
-    assert(m_logicalDevice);
+    assert(m_device);
+    createAllocator();
+    assert(m_allocator);
     createSwapchain(window);
-    assert(m_swapchain);
+    assert(m_swapchain.handle);
+    createDepthResources();
+    assert(m_swapchain.depthImage);
+    assert(m_swapchain.depthImageView);
+    assert(m_swapchain.depthFormat);
+    assert(m_swapchain.depthImageAllocation);
 }
 
 void VulkanContext::createLogicalDevice()
@@ -132,24 +138,27 @@ void VulkanContext::createLogicalDevice()
     };
     VkPhysicalDeviceVulkan12Features enabledVk12Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
-        .pNext = nullptr,
-        .descriptorIndexing = VK_TRUE,
-        .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
-        .descriptorBindingVariableDescriptorCount = VK_TRUE,
-        .runtimeDescriptorArray = VK_TRUE,
+        .pNext = nullptr,              // always good practice to init this
+        .descriptorIndexing = VK_TRUE, // essential for array of textures
+        .runtimeDescriptorArray =
+            VK_TRUE, // essential for GPU pointers / ray tracing
         .bufferDeviceAddress = VK_TRUE
     };
     VkPhysicalDeviceVulkan13Features enabledVk13Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-        .pNext = &enabledVk12Features,
-        .synchronization2 = VK_TRUE,
-        .dynamicRendering = VK_TRUE
+        .pNext = &enabledVk12Features, // chain the 1.2 struct
+        .synchronization2 = VK_TRUE,   // better barries
+        .dynamicRendering = VK_TRUE    // no render passes
     };
     const std::vector<const char*> deviceExtensions{
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
-    const VkPhysicalDeviceFeatures enabledVk10Features{ .samplerAnisotropy =
-                                                            VK_TRUE };
+
+    const VkPhysicalDeviceFeatures enabledVk10Features{
+        .fillModeNonSolid = VK_TRUE,  // wireframe
+        .samplerAnisotropy = VK_TRUE, // sharp textures at angles
+    };
+
     VkDeviceCreateInfo deviceCI{
         .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
         .pNext = &enabledVk13Features,
@@ -159,8 +168,30 @@ void VulkanContext::createLogicalDevice()
         .ppEnabledExtensionNames = deviceExtensions.data(),
         .pEnabledFeatures = &enabledVk10Features
     };
-    vkCreateDevice(m_physicalDevice, &deviceCI, nullptr, &m_logicalDevice);
-    vkGetDeviceQueue(m_logicalDevice, m_queueFamily, 0, &m_queue);
+    vkCreateDevice(m_physicalDevice, &deviceCI, nullptr, &m_device);
+    vkGetDeviceQueue(m_device, m_queueFamily, 0, &m_queue);
+}
+
+void VulkanContext::createAllocator()
+{
+    VmaVulkanFunctions vulkanFunctions{
+        .vkGetInstanceProcAddr = vkGetInstanceProcAddr,
+        .vkGetDeviceProcAddr = vkGetDeviceProcAddr,
+    };
+
+    VmaAllocatorCreateInfo allocatorCI{
+        .flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT,
+        .physicalDevice = m_physicalDevice,
+        .device = m_device,
+        .pVulkanFunctions = &vulkanFunctions,
+        .instance = m_instance,
+        .vulkanApiVersion = VULKAN_API_VERSION,
+    };
+
+    if (vmaCreateAllocator(&allocatorCI, &m_allocator) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create VMA allocator");
+    }
 }
 
 VkSurfaceFormatKHR VulkanContext::chooseSwapSurfaceFormat(
@@ -298,7 +329,7 @@ void VulkanContext::createSwapchain(const Window& window)
     }
 
     // 6. Create swapchain
-    VkSwapchainCreateInfoKHR createInfo{
+    VkSwapchainCreateInfoKHR swapchainCI{
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
         .surface = m_surface,
         .minImageCount = imageCount,
@@ -318,31 +349,31 @@ void VulkanContext::createSwapchain(const Window& window)
         .oldSwapchain = VK_NULL_HANDLE
     };
 
-    vkCreateSwapchainKHR(m_logicalDevice, &createInfo, nullptr, &m_swapchain);
+    vkCreateSwapchainKHR(m_device, &swapchainCI, nullptr, &m_swapchain.handle);
 
-    // 7. Retrieve swapchain images
-    vkGetSwapchainImagesKHR(m_logicalDevice, m_swapchain, &imageCount, nullptr);
-    m_swapchainImages.resize(imageCount);
+    // Retrieve swapchain images
+    vkGetSwapchainImagesKHR(m_device, m_swapchain.handle, &imageCount, nullptr);
+    m_swapchain.images.resize(imageCount);
     vkGetSwapchainImagesKHR(
-        m_logicalDevice,
-        m_swapchain,
+        m_device,
+        m_swapchain.handle,
         &imageCount,
-        m_swapchainImages.data()
+        m_swapchain.images.data()
     );
 
-    // 8. Store format and extent for later use
-    m_swapchainImageFormat = surfaceFormat.format;
-    m_swapchainExtent = extent;
+    // Store format and extent for later use
+    m_swapchain.imageFormat = surfaceFormat.format;
+    m_swapchain.extent = extent;
 
-    // 9. Create image views for each swapchain image
-    m_swapchainImageViews.resize(m_swapchainImages.size());
-    for (size_t i = 0; i < m_swapchainImages.size(); i++)
+    // Create image views for each swapchain image
+    m_swapchain.imageViews.resize(m_swapchain.images.size());
+    for (size_t i = 0; i < m_swapchain.images.size(); i++)
     {
-        VkImageViewCreateInfo viewInfo{
+        VkImageViewCreateInfo imageViewCI{
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = m_swapchainImages[i],
+            .image = m_swapchain.images[i],
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
-            .format = m_swapchainImageFormat,
+            .format = m_swapchain.imageFormat,
             .components = { .r = VK_COMPONENT_SWIZZLE_IDENTITY,
                             .g = VK_COMPONENT_SWIZZLE_IDENTITY,
                             .b = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -355,10 +386,10 @@ void VulkanContext::createSwapchain(const Window& window)
         };
 
         vkCreateImageView(
-            m_logicalDevice,
-            &viewInfo,
+            m_device,
+            &imageViewCI,
             nullptr,
-            &m_swapchainImageViews[i]
+            &m_swapchain.imageViews[i]
         );
     }
 
@@ -366,25 +397,173 @@ void VulkanContext::createSwapchain(const Window& window)
               << extent.width << "x" << extent.height << '\n';
 }
 
+VkFormat VulkanContext::findSupportedFormat(
+    const std::vector<VkFormat>& candidates, VkImageTiling tiling,
+    VkFormatFeatureFlags features
+)
+{
+    for (VkFormat format : candidates)
+    {
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(m_physicalDevice, format, &props);
+
+        if (tiling == VK_IMAGE_TILING_LINEAR &&
+            (props.linearTilingFeatures & features) == features)
+        {
+            return format;
+        }
+        else if (tiling == VK_IMAGE_TILING_OPTIMAL &&
+                 (props.optimalTilingFeatures & features) == features)
+        {
+            return format;
+        }
+    }
+    throw std::runtime_error("failed to find supported format!");
+}
+
+void VulkanContext::createDepthResources()
+{
+    // Choose the format (D32 is best, D24 is fallback)
+    VkFormat depthFormat = findSupportedFormat(
+        { VK_FORMAT_D32_SFLOAT,
+          VK_FORMAT_D32_SFLOAT_S8_UINT,
+          VK_FORMAT_D24_UNORM_S8_UINT },
+        VK_IMAGE_TILING_OPTIMAL,
+        VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+    );
+
+    m_swapchain.depthFormat = depthFormat;
+
+    VkImageCreateInfo imageCI{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = depthFormat,
+        .extent = { .width = m_swapchain.extent.width,
+                    .height = m_swapchain.extent.height,
+                    .depth = 1 },
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+    };
+
+    VmaAllocationCreateInfo allocCI{
+        .flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT,
+        .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+    };
+
+    vmaCreateImage(
+        m_allocator,
+        &imageCI,
+        &allocCI,
+        &m_swapchain.depthImage,
+        &m_swapchain.depthImageAllocation,
+        nullptr
+    );
+
+    VkImageViewCreateInfo imageViewCI{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = m_swapchain.depthImage,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = depthFormat,
+        .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT,
+                              .baseMipLevel = 0,
+                              .levelCount = 1,
+                              .baseArrayLayer = 0,
+                              .layerCount = 1 },
+    };
+
+    if (vkCreateImageView(
+            m_device,
+            &imageViewCI,
+            nullptr,
+            &m_swapchain.depthImageView
+        ) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create depth image view");
+    }
+}
+
+void VulkanContext::createCommandPool()
+{
+    VkCommandPoolCreateInfo commandPoolCI{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = m_queueFamily,
+    };
+
+    if (vkCreateCommandPool(
+            m_device,
+            &commandPoolCI,
+            nullptr,
+            &m_commandPool
+        ) != VK_SUCCESS)
+    {
+        throw std::runtime_error("failed to create command pool");
+    }
+
+    std::cout << "Command pool created\n";
+}
+
+void VulkanContext::createCommandBuffers()
+{
+    VkCommandBufferAllocateInfo allocInfo{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = m_commandPool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = static_cast<uint32_t>(m_commandBuffers.size())
+    };
+
+    VkResult result =
+        vkAllocateCommandBuffers(m_device, &allocInfo, m_commandBuffers.data());
+    if (result != VK_SUCCESS)
+    {
+        throw std::runtime_error("Failed to allocate command buffers");
+    }
+
+    std::cout << "Command buffers allocated\n";
+}
+
 void VulkanContext::shutdown()
 {
-    // Destroy swapchain image views
-    for (auto imageView : m_swapchainImageViews)
+    // Destroy command buffers
+    for (auto buffer : m_commandBuffers)
     {
-        vkDestroyImageView(m_logicalDevice, imageView, nullptr);
+        if (buffer)
+        {
+            vkFreeCommandBuffers(
+                m_device,
+                m_commandPool,
+                m_commandBuffers.size(),
+                &buffer
+            );
+        }
     }
-    m_swapchainImageViews.clear();
 
-    // Destroy swapchain
-    if (m_swapchain)
+    // Destroy command pool
+    if (m_commandPool)
     {
-        vkDestroySwapchainKHR(m_logicalDevice, m_swapchain, nullptr);
+        vkDestroyCommandPool(m_device, m_commandPool, nullptr);
+    }
+
+    // Destroy swapchain (struct cleanup handles image views, depth, and
+    // swapchain)
+    m_swapchain.cleanup(m_device, m_allocator);
+
+    // Destroy VMA allocator (must be before device destruction)
+    if (m_allocator)
+    {
+        vmaDestroyAllocator(m_allocator);
+        m_allocator = VK_NULL_HANDLE;
     }
 
     // Destroy logical device
-    if (m_logicalDevice)
+    if (m_device)
     {
-        vkDestroyDevice(m_logicalDevice, nullptr);
+        vkDestroyDevice(m_device, nullptr);
     }
 
     // Destroy surface
