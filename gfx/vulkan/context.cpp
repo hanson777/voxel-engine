@@ -1,3 +1,4 @@
+#include <stdexcept>
 #define VOLK_IMPLEMENTATION
 #define VMA_IMPLEMENTATION
 
@@ -9,26 +10,52 @@
 #include <vma/vk_mem_alloc.h>
 #include "context.h"
 
-void VulkanContext::createInstance(VulkanInstanceConfig& config)
+void VulkanContext::createInstance()
 {
     VkApplicationInfo appInfo{
         .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-        .pApplicationName = config.appName,
+        .pApplicationName = "App",
         .apiVersion = VULKAN_API_VERSION,
     };
 
-    uint32_t instanceExtensionCount{ 0 };
-    char const* const* instanceExtensions =
-        SDL_Vulkan_GetInstanceExtensions(&instanceExtensionCount);
+    // Get SDL extensions and add debug utils extension
+    uint32_t sdlExtensionCount{ 0 };
+    char const* const* sdlExtensions =
+        SDL_Vulkan_GetInstanceExtensions(&sdlExtensionCount);
+
+    std::vector<const char*> extensions(
+        sdlExtensions,
+        sdlExtensions + sdlExtensionCount
+    );
+    extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+
+#ifdef __APPLE__
+    // Required for MoltenVK on macOS
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+#endif
+
+    // Enable validation layer
+    const char* validationLayer = "VK_LAYER_KHRONOS_validation";
 
     VkInstanceCreateInfo instanceCI{
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+#ifdef __APPLE__
+        .flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR,
+#endif
         .pApplicationInfo = &appInfo,
-        .enabledExtensionCount = instanceExtensionCount,
-        .ppEnabledExtensionNames = instanceExtensions,
+        .enabledLayerCount = 1,
+        .ppEnabledLayerNames = &validationLayer,
+        .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
+        .ppEnabledExtensionNames = extensions.data(),
     };
 
-    vkCreateInstance(&instanceCI, nullptr, &m_instance);
+    VkResult result = vkCreateInstance(&instanceCI, nullptr, &m_instance);
+    if (result != VK_SUCCESS)
+    {
+        std::cerr << "vkCreateInstance failed with error code: " << result
+                  << '\n';
+        throw std::runtime_error("failed to create Vulkan instance");
+    }
 }
 
 void VulkanContext::createSurface(const Window& window)
@@ -101,14 +128,13 @@ uint32_t VulkanContext::findQueueFamily()
     return queueFamily;
 }
 
-void VulkanContext::init(VulkanInstanceConfig& config, const Window& window)
+void VulkanContext::init(const Window& window)
 {
-    createInstance(config);
+    volkInitialize();
+    createInstance();
     assert(m_instance);
-    if (config.enableValidation)
-    {
-        m_debugMessenger = createDebugMessenger(m_instance);
-    }
+    volkLoadInstance(m_instance);
+    m_debugMessenger = createDebugMessenger(m_instance);
     assert(m_debugMessenger);
     createSurface(window);
     assert(m_surface);
@@ -125,6 +151,20 @@ void VulkanContext::init(VulkanInstanceConfig& config, const Window& window)
     assert(m_swapchain.depthImageView);
     assert(m_swapchain.depthFormat);
     assert(m_swapchain.depthImageAllocation);
+    createCommandPool();
+    assert(m_commandPool);
+    createCommandBuffers();
+    for (auto& buffer : m_commandBuffers)
+    {
+        assert(buffer);
+    }
+    createSyncObjects();
+    for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        assert(m_fences[i]);
+        assert(m_presentSemaphores[i]);
+        assert(m_renderSemaphores[i]);
+    }
 }
 
 void VulkanContext::createLogicalDevice()
@@ -151,7 +191,10 @@ void VulkanContext::createLogicalDevice()
         .dynamicRendering = VK_TRUE    // no render passes
     };
     const std::vector<const char*> deviceExtensions{
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+#ifdef __APPLE__
+        "VK_KHR_portability_subset",
+#endif
     };
 
     const VkPhysicalDeviceFeatures enabledVk10Features{
@@ -227,13 +270,13 @@ VkPresentModeKHR VulkanContext::chooseSwapPresentMode(
 )
 {
     // Prefer MAILBOX (triple buffering, low latency, no tearing)
-    for (const auto& availableMode : availableModes)
-    {
-        if (availableMode == VK_PRESENT_MODE_MAILBOX_KHR)
-        {
-            return availableMode;
-        }
-    }
+    // for (const auto& availableMode : availableModes)
+    // {
+    //     if (availableMode == VK_PRESENT_MODE_MAILBOX_KHR)
+    //     {
+    //         return availableMode;
+    //     }
+    // }
 
     // FIFO is guaranteed to be available (V-Sync)
     return VK_PRESENT_MODE_FIFO_KHR;
@@ -527,20 +570,58 @@ void VulkanContext::createCommandBuffers()
     std::cout << "Command buffers allocated\n";
 }
 
+void VulkanContext::createSyncObjects()
+{
+    VkSemaphoreCreateInfo semaphoreCI{
+        .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
+    };
+
+    VkFenceCreateInfo fenceCI{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+                               .flags = VK_FENCE_CREATE_SIGNALED_BIT };
+
+    for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        vkCreateFence(m_device, &fenceCI, nullptr, &m_fences[i]);
+        vkCreateSemaphore(
+            m_device,
+            &semaphoreCI,
+            nullptr,
+            &m_presentSemaphores[i]
+        );
+        std::cout << "Present semaphores: " << (uint64_t)&m_presentSemaphores[i]
+                  << "\n";
+    }
+
+    for (auto& semaphore : m_renderSemaphores)
+    {
+        if (vkCreateSemaphore(m_device, &semaphoreCI, nullptr, &semaphore) !=
+            VK_SUCCESS)
+        {
+            throw std::runtime_error("failed to create render semaphores");
+        }
+        std::cout << "render semaphores: " << (uint64_t)semaphore << "\n";
+    }
+}
+
 void VulkanContext::shutdown()
 {
-    // Destroy command buffers
-    for (auto buffer : m_commandBuffers)
+    // Destroy sync objects
+    for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
     {
-        if (buffer)
-        {
-            vkFreeCommandBuffers(
-                m_device,
-                m_commandPool,
-                m_commandBuffers.size(),
-                &buffer
-            );
-        }
+        vkDestroySemaphore(m_device, m_presentSemaphores[i], nullptr);
+        vkDestroySemaphore(m_device, m_renderSemaphores[i], nullptr);
+        vkDestroyFence(m_device, m_fences[i], nullptr);
+    }
+
+    // Destroy command buffers
+    if (m_commandBuffers.data())
+    {
+        vkFreeCommandBuffers(
+            m_device,
+            m_commandPool,
+            m_commandBuffers.size(),
+            m_commandBuffers.data()
+        );
     }
 
     // Destroy command pool

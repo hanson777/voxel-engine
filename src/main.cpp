@@ -1,4 +1,5 @@
 #include "../core/platform/window.h"
+#include "../gfx/vulkan/context.h"
 #include <iostream>
 
 int main()
@@ -12,6 +13,9 @@ int main()
         .title = "V12",
     };
     Window window(windowConfig);
+
+    VulkanContext ctx;
+    ctx.init(window);
 
     while (!window.shouldClose())
     {

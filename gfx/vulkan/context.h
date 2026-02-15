@@ -13,14 +13,7 @@
 #include "core/platform/window.h"
 
 constexpr uint32_t VULKAN_API_VERSION{ VK_API_VERSION_1_3 };
-constexpr uint32_t MAX_FRAMES_IN_FLIGHT{ 3 };
-
-struct VulkanInstanceConfig
-{
-    const char* appName = "App";
-    uint32_t appVersion = VK_MAKE_VERSION(1, 0, 0);
-    bool enableValidation = true;
-};
+constexpr uint32_t MAX_FRAMES_IN_FLIGHT{ 2 };
 
 struct Swapchain
 {
@@ -74,12 +67,16 @@ class VulkanContext
     VkDevice m_device{ VK_NULL_HANDLE };
     uint32_t m_queueFamily{ 0 };
     VkQueue m_queue{ VK_NULL_HANDLE };
+    VmaAllocator m_allocator{ VK_NULL_HANDLE };
     Swapchain m_swapchain{};
     VkCommandPool m_commandPool{ VK_NULL_HANDLE };
-    std::array<VkCommandBuffer, MAX_FRAMES_IN_FLIGHT> m_commandBuffers{};
-    VmaAllocator m_allocator{ VK_NULL_HANDLE };
+    std::array<VkCommandBuffer, MAX_FRAMES_IN_FLIGHT> m_commandBuffers;
+    std::array<VkFence, MAX_FRAMES_IN_FLIGHT> m_fences;
+    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_presentSemaphores;
+    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_renderSemaphores;
 
-    void createInstance(VulkanInstanceConfig& config);
+    // Instance
+    void createInstance();
 
     // Surface
     void createSurface(const Window& window);
@@ -110,8 +107,14 @@ class VulkanContext
         VkFormatFeatureFlags features
     );
 
+    // Command pool and command buffers
     void createCommandPool();
     void createCommandBuffers();
+
+    // Fences and semaphores
+    void createSyncObjects();
+
+    void shutdown();
 
   public:
     VulkanContext() = default;
@@ -124,8 +127,7 @@ class VulkanContext
     VulkanContext(VulkanContext&&) = delete;
     VulkanContext& operator=(VulkanContext&&) = delete;
 
-    void init(VulkanInstanceConfig& config, const Window& window);
-    void shutdown();
+    void init(const Window& window);
 
     VkInstance getInstance() const;
 };
