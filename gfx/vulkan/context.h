@@ -28,12 +28,14 @@ struct Swapchain
     VmaAllocation depthImageAllocation{ VK_NULL_HANDLE };
     VkImageView depthImageView{ VK_NULL_HANDLE };
     VkFormat depthFormat{ VK_FORMAT_UNDEFINED };
-
-    void cleanup(VkDevice device, VmaAllocator allocator)
+    void destroyImages(VkDevice device, VmaAllocator allocator)
     {
         for (auto view : imageViews)
         {
-            vkDestroyImageView(device, view, nullptr);
+            if (view)
+            {
+                vkDestroyImageView(device, view, nullptr);
+            }
         }
         imageViews.clear();
 
@@ -48,7 +50,10 @@ struct Swapchain
             depthImage = VK_NULL_HANDLE;
             depthImageAllocation = VK_NULL_HANDLE;
         }
-
+    }
+    void cleanup(VkDevice device, VmaAllocator allocator)
+    {
+        destroyImages(device, allocator);
         if (handle)
         {
             vkDestroySwapchainKHR(device, handle, nullptr);
@@ -72,8 +77,9 @@ class VulkanContext
     VkCommandPool m_commandPool{ VK_NULL_HANDLE };
     std::array<VkCommandBuffer, MAX_FRAMES_IN_FLIGHT> m_commandBuffers;
     std::array<VkFence, MAX_FRAMES_IN_FLIGHT> m_fences;
-    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_presentSemaphores;
+    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_presentationSemaphores;
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_renderSemaphores;
+    uint32_t m_currentFrameInFlight{ 0 };
 
     // Instance
     void createInstance();
@@ -90,7 +96,10 @@ class VulkanContext
     void createAllocator();
 
     // Swapchain
-    void createSwapchain(const Window& window);
+    void createSwapchain(
+        const Window& window, const VkSwapchainKHR oldSwapchainHandle
+    );
+    void recreateSwapchain(const Window& window);
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(
         const std::vector<VkSurfaceFormatKHR>& availableFormats
     );
@@ -100,7 +109,7 @@ class VulkanContext
         const VkSurfaceCapabilitiesKHR& capabilities, const Window& window
     );
 
-    // Depth attachment (apart of Swapchain)
+    // Depth attachment
     void createDepthResources();
     VkFormat findSupportedFormat(
         const std::vector<VkFormat>& candidates, VkImageTiling tiling,
@@ -113,6 +122,9 @@ class VulkanContext
 
     // Fences and semaphores
     void createSyncObjects();
+
+    // Frame logic
+    void recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex);
 
     void shutdown();
 
@@ -128,6 +140,9 @@ class VulkanContext
     VulkanContext& operator=(VulkanContext&&) = delete;
 
     void init(const Window& window);
+
+    void beginFrame(const Window& window);
+    void endFrame();
 
     VkInstance getInstance() const;
 };

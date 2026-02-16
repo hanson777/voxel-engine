@@ -1,8 +1,8 @@
-#include <stdexcept>
 #define VOLK_IMPLEMENTATION
 #define VMA_IMPLEMENTATION
 
 #include <iostream>
+#include <stdexcept>
 #include "gfx/vulkan/validation.h"
 #include <volk/volk.h>
 #include <SDL3/SDL.h>
@@ -76,12 +76,12 @@ void VulkanContext::selectPhysicalDevice()
     vkEnumeratePhysicalDevices(m_instance, &deviceCount, devices.data());
     for (const auto& device : devices)
     {
-        VkPhysicalDeviceProperties props;
-        vkGetPhysicalDeviceProperties(device, &props);
-        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(device, &properties);
+        if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
         {
             m_physicalDevice = device;
-            std::cout << "Selected: " << props.deviceName << '\n';
+            std::cout << "Selected: " << properties.deviceName << '\n';
             break;
         }
     }
@@ -128,45 +128,6 @@ uint32_t VulkanContext::findQueueFamily()
     return queueFamily;
 }
 
-void VulkanContext::init(const Window& window)
-{
-    volkInitialize();
-    createInstance();
-    assert(m_instance);
-    volkLoadInstance(m_instance);
-    m_debugMessenger = createDebugMessenger(m_instance);
-    assert(m_debugMessenger);
-    createSurface(window);
-    assert(m_surface);
-    selectPhysicalDevice();
-    assert(m_physicalDevice);
-    createLogicalDevice();
-    assert(m_device);
-    createAllocator();
-    assert(m_allocator);
-    createSwapchain(window);
-    assert(m_swapchain.handle);
-    createDepthResources();
-    assert(m_swapchain.depthImage);
-    assert(m_swapchain.depthImageView);
-    assert(m_swapchain.depthFormat);
-    assert(m_swapchain.depthImageAllocation);
-    createCommandPool();
-    assert(m_commandPool);
-    createCommandBuffers();
-    for (auto& buffer : m_commandBuffers)
-    {
-        assert(buffer);
-    }
-    createSyncObjects();
-    for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
-    {
-        assert(m_fences[i]);
-        assert(m_presentSemaphores[i]);
-        assert(m_renderSemaphores[i]);
-    }
-}
-
 void VulkanContext::createLogicalDevice()
 {
     const float queueFamilyPriorities{ 1.0f };
@@ -187,7 +148,7 @@ void VulkanContext::createLogicalDevice()
     VkPhysicalDeviceVulkan13Features enabledVk13Features{
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .pNext = &enabledVk12Features, // chain the 1.2 struct
-        .synchronization2 = VK_TRUE,   // better barries
+        .synchronization2 = VK_TRUE,   // better barriers
         .dynamicRendering = VK_TRUE    // no render passes
     };
     const std::vector<const char*> deviceExtensions{
@@ -314,7 +275,9 @@ VkExtent2D VulkanContext::chooseSwapExtent(
     return actualExtent;
 }
 
-void VulkanContext::createSwapchain(const Window& window)
+void VulkanContext::createSwapchain(
+    const Window& window, const VkSwapchainKHR oldSwapchainHandle
+)
 {
     // Query surface capabilities
     VkSurfaceCapabilitiesKHR capabilities;
@@ -389,7 +352,7 @@ void VulkanContext::createSwapchain(const Window& window)
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
         .presentMode = presentMode,
         .clipped = VK_TRUE, // Don't render pixels obscured by other windows
-        .oldSwapchain = VK_NULL_HANDLE
+        .oldSwapchain = oldSwapchainHandle,
     };
 
     vkCreateSwapchainKHR(m_device, &swapchainCI, nullptr, &m_swapchain.handle);
@@ -438,6 +401,24 @@ void VulkanContext::createSwapchain(const Window& window)
 
     std::cout << "Swapchain created: " << imageCount << " images, "
               << extent.width << "x" << extent.height << '\n';
+}
+
+void VulkanContext::recreateSwapchain(const Window& window)
+{
+    int width, height;
+    SDL_GetWindowSizeInPixels(window.getSDLWindow(), &width, &height);
+    while (width == 0 || height == 0)
+    {
+        SDL_GetWindowSizeInPixels(window.getSDLWindow(), &width, &height);
+        SDL_WaitEvent(nullptr);
+    }
+    vkDeviceWaitIdle(m_device);
+    m_swapchain.destroyImages(m_device, m_allocator);
+    VkSwapchainKHR oldHandle = m_swapchain.handle;
+    m_swapchain.handle = VK_NULL_HANDLE;
+    createSwapchain(window, oldHandle);
+    createDepthResources();
+    vkDestroySwapchainKHR(m_device, oldHandle, nullptr);
 }
 
 VkFormat VulkanContext::findSupportedFormat(
@@ -586,21 +567,88 @@ void VulkanContext::createSyncObjects()
             m_device,
             &semaphoreCI,
             nullptr,
-            &m_presentSemaphores[i]
+            &m_presentationSemaphores[i]
         );
-        std::cout << "Present semaphores: " << (uint64_t)&m_presentSemaphores[i]
-                  << "\n";
     }
 
     for (auto& semaphore : m_renderSemaphores)
     {
-        if (vkCreateSemaphore(m_device, &semaphoreCI, nullptr, &semaphore) !=
-            VK_SUCCESS)
-        {
-            throw std::runtime_error("failed to create render semaphores");
-        }
-        std::cout << "render semaphores: " << (uint64_t)semaphore << "\n";
+        vkCreateSemaphore(m_device, &semaphoreCI, nullptr, &semaphore);
     }
+}
+
+void VulkanContext::init(const Window& window)
+{
+    volkInitialize();
+    createInstance();
+    assert(m_instance);
+    volkLoadInstance(m_instance);
+    m_debugMessenger = createDebugMessenger(m_instance);
+    assert(m_debugMessenger);
+    createSurface(window);
+    assert(m_surface);
+    selectPhysicalDevice();
+    assert(m_physicalDevice);
+    createLogicalDevice();
+    assert(m_device);
+    createAllocator();
+    assert(m_allocator);
+    createSwapchain(window, nullptr);
+    assert(m_swapchain.handle);
+    createDepthResources();
+    assert(m_swapchain.depthImage);
+    assert(m_swapchain.depthImageView);
+    assert(m_swapchain.depthFormat);
+    assert(m_swapchain.depthImageAllocation);
+    createCommandPool();
+    assert(m_commandPool);
+    createCommandBuffers();
+    for (auto& buffer : m_commandBuffers)
+    {
+        assert(buffer);
+    }
+    createSyncObjects();
+    for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        assert(m_fences[i]);
+        assert(m_presentationSemaphores[i]);
+        assert(m_renderSemaphores[i]);
+    }
+}
+
+void recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex)
+{
+}
+
+void VulkanContext::beginFrame(const Window& window)
+{
+    vkWaitForFences(
+        m_device,
+        1,
+        &m_fences[m_currentFrameInFlight],
+        true,
+        UINT64_MAX
+    );
+    vkResetFences(m_device, 1, &m_fences[m_currentFrameInFlight]);
+
+    uint32_t imageIndex;
+    VkResult result = vkAcquireNextImageKHR(
+        m_device,
+        m_swapchain.handle,
+        UINT64_MAX,
+        m_presentationSemaphores[m_currentFrameInFlight],
+        VK_NULL_HANDLE,
+        &imageIndex
+    );
+    if (result == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        recreateSwapchain(window);
+        return;
+    }
+}
+
+void endFrame()
+{
 }
 
 void VulkanContext::shutdown()
@@ -608,7 +656,7 @@ void VulkanContext::shutdown()
     // Destroy sync objects
     for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
     {
-        vkDestroySemaphore(m_device, m_presentSemaphores[i], nullptr);
+        vkDestroySemaphore(m_device, m_presentationSemaphores[i], nullptr);
         vkDestroySemaphore(m_device, m_renderSemaphores[i], nullptr);
         vkDestroyFence(m_device, m_fences[i], nullptr);
     }
