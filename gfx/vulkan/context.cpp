@@ -421,12 +421,12 @@ void VulkanContext::recreateSwapchain(const Window& window)
     vkDestroySwapchainKHR(m_device, oldHandle, nullptr);
 }
 
-VkFormat VulkanContext::findSupportedFormat(
+VkFormat VulkanContext::findDepthFormat(
     const std::vector<VkFormat>& candidates, VkImageTiling tiling,
     VkFormatFeatureFlags features
 )
 {
-    for (VkFormat format : candidates)
+    for (const VkFormat& format : candidates)
     {
         VkFormatProperties props;
         vkGetPhysicalDeviceFormatProperties(m_physicalDevice, format, &props);
@@ -448,7 +448,7 @@ VkFormat VulkanContext::findSupportedFormat(
 void VulkanContext::createDepthResources()
 {
     // Choose the format (D32 is best, D24 is fallback)
-    VkFormat depthFormat = findSupportedFormat(
+    VkFormat depthFormat = findDepthFormat(
         { VK_FORMAT_D32_SFLOAT,
           VK_FORMAT_D32_SFLOAT_S8_UINT,
           VK_FORMAT_D24_UNORM_S8_UINT },
@@ -608,12 +608,51 @@ void VulkanContext::init(const Window& window)
         assert(buffer);
     }
     createSyncObjects();
-    for (auto i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
     {
         assert(m_fences[i]);
         assert(m_presentationSemaphores[i]);
         assert(m_renderSemaphores[i]);
     }
+}
+
+void VulkanContext::transitionImageLayout(
+    VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout,
+    VkImageLayout newLayout
+)
+{
+    VkImageMemoryBarrier2 barrier{
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+        .oldLayout = oldLayout,
+        .newLayout = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange = { .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                              .levelCount = 1,
+                              .layerCount = 1 }
+    };
+
+    if (newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+    {
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_NONE;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    }
+    else if (newLayout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+    {
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_NONE;
+    }
+
+    VkDependencyInfo dependencyInfo{ .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                                     .imageMemoryBarrierCount = 1,
+                                     .pImageMemoryBarriers = &barrier };
+
+    vkCmdPipelineBarrier2(cmd, &dependencyInfo);
 }
 
 void recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex)
@@ -622,21 +661,15 @@ void recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex)
 
 void VulkanContext::beginFrame(const Window& window)
 {
-    vkWaitForFences(
-        m_device,
-        1,
-        &m_fences[m_currentFrameInFlight],
-        true,
-        UINT64_MAX
-    );
-    vkResetFences(m_device, 1, &m_fences[m_currentFrameInFlight]);
+    vkWaitForFences(m_device, 1, &m_fences[m_currentFrame], true, UINT64_MAX);
+    vkResetFences(m_device, 1, &m_fences[m_currentFrame]);
 
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(
         m_device,
         m_swapchain.handle,
         UINT64_MAX,
-        m_presentationSemaphores[m_currentFrameInFlight],
+        m_presentationSemaphores[m_currentFrame],
         VK_NULL_HANDLE,
         &imageIndex
     );
@@ -645,6 +678,22 @@ void VulkanContext::beginFrame(const Window& window)
         recreateSwapchain(window);
         return;
     }
+
+    VkCommandBuffer cmdBuffer = m_commandBuffers[m_currentFrame];
+    vkResetCommandBuffer(cmdBuffer, 0);
+    VkCommandBufferBeginInfo cmdBufferBI{
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+
+    };
+    vkBeginCommandBuffer(cmdBuffer, &cmdBufferBI);
+
+    transitionImageLayout(
+        cmdBuffer,
+        m_swapchain.images[imageIndex],
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+    );
 }
 
 void endFrame()

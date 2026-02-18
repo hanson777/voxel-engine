@@ -79,7 +79,7 @@ class VulkanContext
     std::array<VkFence, MAX_FRAMES_IN_FLIGHT> m_fences;
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_presentationSemaphores;
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_renderSemaphores;
-    uint32_t m_currentFrameInFlight{ 0 };
+    uint32_t m_currentFrame{ 0 };
 
     // Instance
     void createInstance();
@@ -111,7 +111,7 @@ class VulkanContext
 
     // Depth attachment
     void createDepthResources();
-    VkFormat findSupportedFormat(
+    VkFormat findDepthFormat(
         const std::vector<VkFormat>& candidates, VkImageTiling tiling,
         VkFormatFeatureFlags features
     );
@@ -125,6 +125,10 @@ class VulkanContext
 
     // Frame logic
     void recordCommandBuffer(VkCommandBuffer cmd, uint32_t imageIndex);
+    void transitionImageLayout(
+        VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout,
+        VkImageLayout newLayout
+    );
 
     void shutdown();
 
